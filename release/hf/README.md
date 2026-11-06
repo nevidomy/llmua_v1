@@ -5,7 +5,9 @@ its own architecture, `model_type: "llmua"` (`LlmuaForCausalLM`). The weights ar
 under their training names: `embed`, `blocks.i.mha.qkv`, `ff.lin1` and so on. The fused QKV and gate/up
 weights are not reshuffled, and the output layer is tied to the embedding.
 
-The weights themselves are not published yet. A model card will accompany them.
+The released weights, with model cards, are
+[nevidomy/llmua-v1-124m](https://huggingface.co/nevidomy/llmua-v1-124m) and
+[nevidomy/llmua-v1-124m-sft](https://huggingface.co/nevidomy/llmua-v1-124m-sft).
 
 ## Files
 
