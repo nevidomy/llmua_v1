@@ -13,7 +13,7 @@ Everything below is copy-paste, in order. Total GPU time ≈ 30–40 min, mostly
 export LLMUA_ROOT=${LLMUA_ROOT:-~/data/llmua}   # data root: strings.jsonl lives under it
 REPO=/path/to/this/repository                    # the checkout that contains uk4b/
 mkdir -p ~/uk4b && cd ~/uk4b
-pip install sentencepiece termcolor pandas numpy
+pip install sentencepiece termcolor pandas numpy bitsandbytes   # bitsandbytes: model.py's StableEmbedding; do not stub it
 
 curl -sLO https://raw.githubusercontent.com/proger/uk4b/main/examples/score.py
 curl -sLO https://raw.githubusercontent.com/proger/uk4b/main/examples/model.py
@@ -70,30 +70,16 @@ If compile fails on your torch, use the fallback in §7.
 
 ## 3. Write the input files from `strings.jsonl`
 
+`uk4b_prep.py` reads `$LLMUA_ROOT/bins/bruk_uk4b_sentenses/strings.jsonl`, checks every sentence (count, hash,
+length, no newline or tab), and writes `paper_set.txt` and `paper_set_typo.txt` (apostrophes replaced by U+2019)
+to the current directory. The files have no trailing newline, because `score.py` splits on `\n` and an empty
+last line becomes a `nan` row. The two 2,000-sentence files for §4 are cut from them the same way:
+
 ```bash
-STRINGS=$LLMUA_ROOT/bins/bruk_uk4b_sentenses/strings.jsonl
-cat > uk4b_prep.py <<'EOF'
-import json, hashlib, sys
-src = sys.argv[1]
-rows = [json.loads(l) for l in open(src, encoding='utf-8')]
-paper = [r for r in rows if not r['exact_hit']]
-assert len(paper) == 32960, len(paper)
-for r in paper:
-    t = r['text']
-    assert t == t.strip() and '\n' not in t and '\t' not in t, r['sha1']
-    assert len(t) == r['n_chars'], r['sha1']
-    assert hashlib.sha1(t.encode('utf-8')).hexdigest() == r['sha1'], r['sha1']
-def dump(path, texts):  # NO trailing newline: score.py splits on '\n'; an empty last line → nan row
-    open(path, 'w', encoding='utf-8').write('\n'.join(texts))
-texts = [r['text'] for r in paper]
-dump('paper_set.txt', texts)
-dump('paper_set_typo.txt', [t.replace("'", '\u2019') for t in texts])
-dump('apos_a.txt', texts[:2000])
-dump('apos_b.txt', [t.replace("'", '\u2019') for t in texts[:2000]])
-print('ok', len(texts), 'sentences')
-EOF
-python uk4b_prep.py $STRINGS
+python $REPO/uk4b/uk4b_prep.py
 wc -l paper_set.txt   # prints 32959 (no trailing newline) — correct
+head -n 2000 paper_set.txt      | head -c -1 > apos_a.txt
+head -n 2000 paper_set_typo.txt | head -c -1 > apos_b.txt
 ```
 
 ## 4. Apostrophe check on Small (2,000 sentences, ~1 min)
@@ -102,8 +88,8 @@ BrUK is natively ASCII-apostrophe, so `paper_set.txt` as-is *is* their published
 on the same raw text. This check only tells you whether to add a footnote.
 
 ```bash
-python score.py --tsv --spm wiki.model --sentences apos_a.txt small.pt > apos_a.tsv 2> apos_a.log
-python score.py --tsv --spm wiki.model --sentences apos_b.txt small.pt > apos_b.tsv 2> apos_b.log
+python score.py small.pt --tsv --spm wiki.model --sentences apos_a.txt > apos_a.tsv 2> apos_a.log
+python score.py small.pt --tsv --spm wiki.model --sentences apos_b.txt > apos_b.tsv 2> apos_b.log
 
 grep -m1 "load_state_dict\|All keys\|Incompatible" apos_a.log   # must NOT list missing transformer weights
 python - <<'EOF'
@@ -121,9 +107,12 @@ column** and report it as a footnote; the headline stays on `paper_set.txt`.
 
 ## 5. Score the full set with all three checkpoints
 
+Put the checkpoint path first: `--sentences` takes any number of files, so a path after it is read as another
+sentence file and the run fails.
+
 ```bash
 for m in small medium large; do
-  python score.py --tsv --spm wiki.model --sentences paper_set.txt $m.pt > $m.tsv 2> $m.log
+  python score.py $m.pt --tsv --spm wiki.model --sentences paper_set.txt > $m.tsv 2> $m.log
   grep -c truncated $m.log   # should print 0
 done
 ```
@@ -132,32 +121,17 @@ Small ≈ 5 min, Medium ≈ 10, Large ≈ 15–20 at batch 1.
 
 ## 6. Join back to your sentences and compute bpc
 
+`uk4b_join.py <name> <tsv>` matches each scored sentence to `strings.jsonl` by sha1, checks that every sentence was
+scored and that the character counts agree, prints the pooled bpc, and writes `strings_uk4b_<name>.jsonl` to the
+current directory:
+
 ```bash
-cat > uk4b_join.py <<'EOF'
-import json, sys, numpy as np, pandas as pd
-src, model, tsv = sys.argv[1], sys.argv[2], sys.argv[3]
-rows = [json.loads(l) for l in open(src, encoding='utf-8')]
-paper = [r for r in rows if not r['exact_hit']]
-df = pd.read_csv(tsv, sep='\t', quoting=3, dtype={'id': str})
-assert len(df) == len(paper) and df.id.is_unique, (len(df), len(paper))
-assert np.isfinite(df.ppl.values).all()
-bits  = dict(zip(df.id, np.log(df.ppl.values) * df.sentence_len.values / np.log(2)))
-chars = dict(zip(df.id, df.sentence.str.len().values))
-tot_b = tot_c = 0.0
-for r in paper:
-    assert r['sha1'] in bits, r['sha1']                 # every sentence scored, none extra
-    assert chars[r['sha1']] == r['n_chars'], r['sha1']  # identical string on both sides
-    r[f'bits_uk4b_{model}'] = float(bits[r['sha1']])
-    tot_b += bits[r['sha1']]; tot_c += r['n_chars']
-print(f'{model}: {tot_b / tot_c:.4f} bpc  ({len(paper)} sentences, {int(tot_c)} chars)')
-with open(f'strings_uk4b_{model}.jsonl', 'w', encoding='utf-8') as f:
-    for r in rows: f.write(json.dumps(r, ensure_ascii=False) + '\n')
-EOF
-for m in small medium large; do python uk4b_join.py $STRINGS $m $m.tsv; done
+for m in small medium large; do python $REPO/uk4b/uk4b_join.py $m $m.tsv; done
 ```
 
-Output is three lines, e.g. `small: 1.5xxx bpc`. Those go in the table next to
-P1 1.835 · P2 1.713 · P3 1.631 · P4 1.530 · target 1.394.
+Each run prints one line, e.g. `large: 1.4xxx bpc on 32960 sentences, N chars`. These go in the table next to the
+ladder's sentence column (Table 5, uk4b rule): P1 1.7189 · P2 1.6096 · P3 1.5372 · P4 1.4478 · target 1.3267.
+The paper's uk4b Large figure on the same sentences is 1.4665.
 
 ## 7. Fallback if `torch.compile` fails
 

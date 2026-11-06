@@ -13,6 +13,7 @@ plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 8, "axes.labelsi
     "lines.linewidth": 1.3, "pdf.fonttype": 42, "savefig.dpi": 300, "savefig.bbox": "tight"})
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = os.path.join(HERE, "data") + os.sep; O = os.environ.get("OUT_DIR", HERE) + os.sep
+os.makedirs(O, exist_ok=True)
 CPT, LN2 = 4.0305, np.log(2)              # validation set characters per token (§2); nats -> bpc = /CPT/ln2
 def despine(ax):
     for s in ("top", "right"): ax.spines[s].set_visible(False)

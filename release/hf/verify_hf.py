@@ -3,8 +3,8 @@
 
     python verify_hf.py logits  --hf DIR --ckpt CKPT --out JSON
     python verify_hf.py fullval --hf DIR --ckpt CKPT --out JSON [--variants a,b,cprime,native_bf16,native_fp32,hf_bf16]
-    python verify_hf.py gen     --hf DIR --ckpt CKPT --out JSON          (SFT only)
-    python verify_hf.py tok     --hf DIR --hf-sft DIR --ckpt-sft CKPT --out JSON
+    python verify_hf.py gen     --hf DIR --ckpt CKPT --out JSON [--max-new 200] [--min-answer 0]   (SFT only)
+    python verify_hf.py tok     --hf BASE_DIR --hf-sft SFT_DIR --out JSON [--sft-data DIR]
 
 fullval re-uses the repo's own trainers (same packing, windows, ignore-index, chars-per-token) and swaps only the
 model forward for an adapter, so any bpc difference is the model, not the harness.

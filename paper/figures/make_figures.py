@@ -13,6 +13,7 @@ from matplotlib.ticker import FixedLocator, FuncFormatter, NullFormatter
 from scipy import optimize
 
 OUT = os.environ.get("OUT_DIR", os.path.dirname(os.path.abspath(__file__))) + os.sep
+os.makedirs(OUT, exist_ok=True)
 
 # ---------- style (print, single/double column) ----------
 BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"   # validated slots 1-3 (all-pairs CVD-safe)

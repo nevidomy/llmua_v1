@@ -14,7 +14,7 @@ The released weights, with model cards, are
 | file | what |
 |---|---|
 | `llmua_hf/` | `LlmuaConfig` and `LlmuaForCausalLM` for transformers (KV cache, padding masks, `generate`); installable with `pip install ./release/hf/llmua_hf` |
-| `convert_to_hf.py` | checkpoint → HF folder: safetensors, config, tokenizer, generation config, and for fine-tuned checkpoints a chat template |
+| `convert_to_hf.py` | checkpoint → HF folder: safetensors, config, tokenizer (left padding, newline normalizer), generation config (BOS suppressed), and for fine-tuned checkpoints a chat template. Reproduces the released files byte for byte |
 | `verify_hf.py` | checks against the native model: logits, full-validation bpc, greedy generation, tokenizer |
 | `verify_llmua_extra.py` | batched generation with left padding, save/load round trip, loading through `register()` |
 | `export_qwen3_compat.py` | optional export in the stock `Qwen3ForCausalLM` layout, for tools that only run known architectures (vLLM, llama.cpp). It re-splits the tensors, so it is not the release format |
@@ -26,7 +26,7 @@ The released weights, with model cards, are
 
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
-tok = AutoTokenizer.from_pretrained("out/llmua-124m")
+tok = AutoTokenizer.from_pretrained("out/llmua-124m", trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained("out/llmua-124m", trust_remote_code=True)
 ids = tok("Київ — столиця", return_tensors="pt").input_ids     # the tokenizer prepends BOS
 print(tok.decode(model.generate(ids, max_new_tokens=40)[0], skip_special_tokens=True))
@@ -52,5 +52,5 @@ These checks ran on the 124M target (80×), the fine-tuned model and a P1 rung:
   epsilon of 2^-7 would cost about 2.5 bpc.
 - **Fine-tuning specials.** The fine-tuning tokens `<|usr|>`, `<|assistant|>` and `<|end|>` reuse ids 201–203.
   In the base vocabulary those ids are the byte tokens for VT, FF and CR. The exported fine-tuned tokenizer
-  renames them, so raw VT, FF and CR characters in text are dropped. Normalise `\r\n` to `\n` before
-  tokenising.
+  renames them. Both exported tokenizers carry a normalizer that maps `\r\n`, `\r`, VT and FF to `\n` before
+  tokenising, so those characters are normalised to a newline, not dropped, and never reach ids 201–203.

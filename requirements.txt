@@ -18,5 +18,5 @@ scipy             # 1.18.1
 sentencepiece     # 0.2.2
 termcolor         # 3.3.0
 
-# optional: uk4b/model.py also imports bitsandbytes (stub it if you only score),
-# and release/hf/convert_to_hf.py needs transformers.
+# uk4b/ only: `pip install bitsandbytes` (uk4b/model.py imports it for StableEmbedding; do not stub it,
+# that changes the scores). release/hf/convert_to_hf.py needs transformers.

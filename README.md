@@ -216,7 +216,7 @@ python prepare_sft.py tokenize --val-nums --seed 47 \
     -p $T/fidoai.json,500,5000 -p $T/fidonews.json,500,6000 \
     -p $T/uagec.json,500,3678 -p $T/aya.json,200,322 \
     --out $LLMUA_ROOT/sft_data/bins/15k \
-    --bos-id 0 --usr-id 201 --assistant-id 202 --end-id 203 --context-width 2048
+    --bos-id 0 --usr-id 201 --assistant-id 202 --end-id 203 --context-width 2048 --yes
 python experiments/replay.py --id 105
 python -m sft.chat --ckpt <run_dir>/ckpt_final.pt --temperature 0
 ```

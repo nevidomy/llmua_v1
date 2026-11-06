@@ -8,8 +8,11 @@ The safetensors hold the trained tensors under their training names and shapes (
 fused qkv and fused gate/up; lmh is tied to embed and stored once), nothing reshuffled. The folder also carries
 copies of configuration_llmua.py / modeling_llmua.py and an `auto_map`, so
 `AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True)` works; with `llmua_hf.register()` it works
-without trust_remote_code. Tokenizer: the `tokenizers` JSON with a BOS-only post-processor; for SFT checkpoints the three
-byte tokens 201/202/203 are renamed <|usr|>/<|assistant|>/<|end|> and a chat template is written (see REPORT.md).
+without trust_remote_code. Tokenizer: the `tokenizers` JSON with a BOS-only post-processor and a normalizer that maps
+\r\n, \r, VT and FF to \n (the model never saw them); for SFT checkpoints the three byte tokens 201/202/203 (VT, FF, CR in
+the original vocabulary) are renamed <|usr|>/<|assistant|>/<|end|> and a chat template is written. The tokenizer config
+pads on the left, so batched `generate` works with the tokenizer's own padding. The generation config suppresses BOS
+(`suppress_tokens: [0]`): the model should never produce it mid-text.
 
 RMSNorm eps: nn.RMSNorm(eps=None) in torch 2.11 uses the fp32 epsilon for all norms, bf16 inputs included
 (eps_micro.py, eps_probe.py), so config.rms_norm_eps = 1.1920928955078125e-07 reproduces training exactly.
@@ -65,15 +68,19 @@ def sft_specials(cfg):
 
 
 def tokenizer_json(src, sft=None):
-    """The `tokenizers` JSON with two edits: post-processor adds <|bos|> only (the original also appends <|eos|>, wrong
-    for prompting); for SFT, ids 201-203 (the raw bytes \\x0b \\x0c \\r in the original vocab) are renamed to named
-    specials. No BPE merge involves those three characters (asserted), so everything else tokenizes identically."""
+    """The `tokenizers` JSON with three edits: the post-processor adds <|bos|> only (the original also appends <|eos|>,
+    wrong for prompting); a normalizer maps \\r\\n, \\r, VT and FF to \\n (so they never reach the byte tokens below);
+    for SFT, ids 201-203 (the raw bytes \\x0b \\x0c \\r in the original vocab) are renamed to named specials. No BPE
+    merge involves those three characters (asserted), so everything else tokenizes identically."""
     d = json.load(open(src))
     bos = next(t for t in d['added_tokens'] if t['content'] == '<|bos|>')
     pp = d['post_processor']
     procs = pp['processors'] if pp['type'] == 'Sequence' else [pp]
     tp = next(p for p in procs if p['type'] == 'TemplateProcessing')
     tp['single'] = [{'SpecialToken': {'id': bos['content'], 'type_id': 0}}, {'Sequence': {'id': 'A', 'type_id': 0}}]
+    assert d['normalizer'] is None
+    d['normalizer'] = {'type': 'Sequence', 'normalizers': [
+        {'type': 'Replace', 'pattern': {'String': old}, 'content': '\n'} for old in ('\r\n', '\r', '\x0b', '\x0c')]}
     if sft:
         b2u, vocab = bytes_to_unicode(), d['model']['vocab']
         for key, name in SFT_NAMES.items():
@@ -92,7 +99,7 @@ def save_tokenizer(out_dir, src, sft, max_len):
     tmp = os.path.join(out_dir, 'tokenizer.json')
     json.dump(d, open(tmp, 'w'), ensure_ascii=False)
     kw = dict(bos_token='<|bos|>', eos_token='<|end|>' if sft else '<|eos|>', pad_token='<|bos|>',
-              model_max_length=max_len, clean_up_tokenization_spaces=False,
+              model_max_length=max_len, clean_up_tokenization_spaces=False, padding_side='left',
               model_input_names=['input_ids', 'attention_mask'])      # no token_type_ids: model.generate(**tok(text)) must work
     if sft:
         kw['additional_special_tokens'] = list(SFT_NAMES.values())
@@ -103,6 +110,10 @@ def save_tokenizer(out_dir, src, sft, max_len):
             assert tok.convert_tokens_to_ids(name) == sft[key], name
     assert tok.bos_token_id == 0
     tok.save_pretrained(out_dir)
+    with open(tmp) as f:                                   # released tokenizer.json is the compact dump (2.2 MB, one line)
+        compact = json.dumps(json.load(f), ensure_ascii=False)
+    with open(tmp, 'w') as f:
+        f.write(compact)
     return tok
 
 
@@ -169,6 +180,10 @@ def main():
     json.dump(c, open(cp, 'w'), indent=2, sort_keys=True); open(cp, 'a').write('\n')
     from transformers import GenerationConfig
     GenerationConfig(bos_token_id=bos_id, eos_token_id=eos_id, pad_token_id=bos_id).save_pretrained(args.out_dir)
+    gp = os.path.join(args.out_dir, 'generation_config.json'); g = json.load(open(gp))
+    g['suppress_tokens'] = [bos_id]                    # never emit BOS; appended last, as in the released files
+    with open(gp, 'w') as f:
+        json.dump(g, f, indent=2)
     tok = save_tokenizer(args.out_dir, args.tokenizer, specials, arch['width'])
     print(f"saved {args.out_dir}: {'SFT' if sft else 'base'}  d={arch['embeddings']} L={arch['blocks']} "
           f"H={arch['embeddings'] // arch['headsize']} F={arch['ff_width']}  params {sum(p.numel() for p in model.parameters()):,}  "

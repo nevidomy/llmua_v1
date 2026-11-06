@@ -195,7 +195,7 @@ class LlmuaModel(_Backbone, LlmuaPreTrainedModel):
 
 
 class LlmuaForCausalLM(_Backbone, LlmuaPreTrainedModel, GenerationMixin):
-    _tied_weights_keys = ["lmh.weight"]
+    _tied_weights_keys = {"lmh.weight": "embed.weight"}      # dict form: required by transformers 5.x, accepted by 4.57
 
     def __init__(self, config: LlmuaConfig):
         super().__init__(config)
