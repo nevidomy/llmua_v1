@@ -32,7 +32,7 @@ def stage_batched(a):
     prompts = [tok.apply_chat_template([{'role': 'user', 'content': t}], add_generation_prompt=True, tokenize=False) for t in texts]
     singles_in = [tok(p, add_special_tokens=False, return_tensors='pt').input_ids[0] for p in prompts]
     assert len({len(x) for x in singles_in}) == 4, 'prompt lengths must differ'
-    kw = dict(do_sample=False, num_beams=1, max_new_tokens=a.max_new, eos_token_id=203, pad_token_id=0, temperature=None, top_p=None, top_k=None)
+    kw = dict(do_sample=False, num_beams=1, max_new_tokens=a.max_new, eos_token_id=203, pad_token_id=1, temperature=None, top_p=None, top_k=None)
     with torch.no_grad():
         single = []
         for x in singles_in:
@@ -92,7 +92,7 @@ def stage_register(a):
     with torch.no_grad():
         lg = m(x).logits; hb = b(x).last_hidden_state
         same_head = torch.equal(m.lmh(hb), lg)
-        gen = m.generate(x[:1, :20], do_sample=False, max_new_tokens=10, pad_token_id=0)
+        gen = m.generate(x[:1, :20], do_sample=False, max_new_tokens=10, pad_token_id=1)
     res = {'hf': a.hf, 'config_class': type(cfg).__module__ + '.' + type(cfg).__name__, 'model_class': type(m).__module__ + '.' + type(m).__name__,
            'base_class': type(b).__module__ + '.' + type(b).__name__, 'loaded_without_trust_remote_code': True,
            'causal_lm_loading_info': {k: v for k, v in info.items()}, 'base_model_loading_info': {k: v for k, v in binfo.items()},

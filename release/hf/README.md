@@ -28,8 +28,8 @@ The released weights, with model cards, are
 from transformers import AutoModelForCausalLM, AutoTokenizer
 tok = AutoTokenizer.from_pretrained("out/llmua-124m", trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained("out/llmua-124m", trust_remote_code=True)
-ids = tok("Київ — столиця", return_tensors="pt").input_ids     # the tokenizer prepends BOS
-print(tok.decode(model.generate(ids, max_new_tokens=40)[0], skip_special_tokens=True))
+inputs = tok("Київ — столиця", return_tensors="pt")             # the tokenizer prepends BOS
+print(tok.decode(model.generate(**inputs, max_new_tokens=40)[0], skip_special_tokens=True))
 ```
 
 After `pip install ./release/hf/llmua_hf`, call `llmua_hf.register()` and drop `trust_remote_code`.

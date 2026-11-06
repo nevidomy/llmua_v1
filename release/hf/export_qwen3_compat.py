@@ -32,7 +32,7 @@ import argparse, json, math, os, sys
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from convert_to_hf import (DEFAULT_TOKENIZER, FP32_EPS, SFT_NAMES, load_ckpt, save_tokenizer, sft_specials)   # shared with the native exporter
+from convert_to_hf import (DEFAULT_TOKENIZER, FP32_EPS, PAD_ID, SFT_NAMES, load_ckpt, save_tokenizer, sft_specials)   # shared with the native exporter
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 ROPE_THETA = 10000.0                           # MultiheadAttention: 10000.0**(-2i/headsize)
@@ -121,10 +121,10 @@ def main():
     bos_id = int(arch['bos_id']); eos_id = specials['end_id'] if sft else 1       # base: pretraining docs end in <|eos|>=1
     os.makedirs(args.out_dir, exist_ok=True)
 
-    model = build_hf(sd, arch, args.rms_eps, bos_id, eos_id, bos_id)
+    model = build_hf(sd, arch, args.rms_eps, bos_id, eos_id, PAD_ID)
     model.save_pretrained(args.out_dir, safe_serialization=True)       # fp32, tied weight stored once
     from transformers import GenerationConfig
-    GenerationConfig(bos_token_id=bos_id, eos_token_id=eos_id, pad_token_id=bos_id).save_pretrained(args.out_dir)
+    GenerationConfig(bos_token_id=bos_id, eos_token_id=eos_id, pad_token_id=PAD_ID).save_pretrained(args.out_dir)
     tok = save_tokenizer(args.out_dir, args.tokenizer, specials, arch['width'])
     print(f"saved {args.out_dir}: {'SFT' if sft else 'base'}  d={arch['embeddings']} L={arch['blocks']} "
           f"H={arch['embeddings'] // arch['headsize']} F={arch['ff_width']}  params {sum(p.numel() for p in model.parameters()):,}  "

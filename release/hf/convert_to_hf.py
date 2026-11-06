@@ -12,7 +12,8 @@ without trust_remote_code. Tokenizer: the `tokenizers` JSON with a BOS-only post
 \r\n, \r, VT and FF to \n (the model never saw them); for SFT checkpoints the three byte tokens 201/202/203 (VT, FF, CR in
 the original vocabulary) are renamed <|usr|>/<|assistant|>/<|end|> and a chat template is written. The tokenizer config
 pads on the left, so batched `generate` works with the tokenizer's own padding. The generation config suppresses BOS
-(`suppress_tokens: [0]`): the model should never produce it mid-text.
+(`suppress_tokens: [0]`): the model should never produce it mid-text. Padding is `<|eos|>` (id 1), never BOS: with
+pad = BOS, `generate(ids)` without an attention mask would mask out the prompt's own BOS.
 
 RMSNorm eps: nn.RMSNorm(eps=None) in torch 2.11 uses the fp32 epsilon for all norms, bf16 inputs included
 (eps_micro.py, eps_probe.py), so config.rms_norm_eps = 1.1920928955078125e-07 reproduces training exactly.
@@ -25,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
 DEFAULT_TOKENIZER = os.path.join(REPO, 'results', 'ua_bpe_32768.json')
 FP32_EPS = 1.1920928955078125e-07              # torch.finfo(torch.float32).eps
+PAD_ID = 1                                     # <|eos|>: pad must NOT be BOS (id 0): generate() without a mask would mask the prompt's BOS
 SFT_NAMES = {'usr_id': '<|usr|>', 'assistant_id': '<|assistant|>', 'end_id': '<|end|>'}
 # GPT-2 byte-level characters of the bytes that sft/chat.py reuses as SFT specials (ids 201/202/203 = \x0b, \x0c, \r)
 SFT_RAW_BYTES = {'usr_id': 0x0B, 'assistant_id': 0x0C, 'end_id': 0x0D}
@@ -98,7 +100,7 @@ def save_tokenizer(out_dir, src, sft, max_len):
     d = tokenizer_json(src, sft)
     tmp = os.path.join(out_dir, 'tokenizer.json')
     json.dump(d, open(tmp, 'w'), ensure_ascii=False)
-    kw = dict(bos_token='<|bos|>', eos_token='<|end|>' if sft else '<|eos|>', pad_token='<|bos|>',
+    kw = dict(bos_token='<|bos|>', eos_token='<|end|>' if sft else '<|eos|>', pad_token='<|eos|>',
               model_max_length=max_len, clean_up_tokenization_spaces=False, padding_side='left',
               model_input_names=['input_ids', 'attention_mask'])      # no token_type_ids: model.generate(**tok(text)) must work
     if sft:
@@ -108,7 +110,7 @@ def save_tokenizer(out_dir, src, sft, max_len):
         tok.chat_template = CHAT_TEMPLATE
         for key, name in SFT_NAMES.items():
             assert tok.convert_tokens_to_ids(name) == sft[key], name
-    assert tok.bos_token_id == 0
+    assert tok.bos_token_id == 0 and tok.pad_token_id == PAD_ID, (tok.bos_token_id, tok.pad_token_id)
     tok.save_pretrained(out_dir)
     with open(tmp) as f:                                   # released tokenizer.json is the compact dump (2.2 MB, one line)
         compact = json.dumps(json.load(f), ensure_ascii=False)
@@ -170,7 +172,7 @@ def main():
     bos_id = int(arch['bos_id']); eos_id = specials['end_id'] if sft else 1       # base: pretraining docs end in <|eos|>=1
     os.makedirs(args.out_dir, exist_ok=True)
 
-    model = build_model(sd, arch, args.rms_eps, bos_id, eos_id, bos_id)
+    model = build_model(sd, arch, args.rms_eps, bos_id, eos_id, PAD_ID)
     LlmuaConfig.register_for_auto_class('AutoConfig')                             # auto_map + copies of the two .py files
     LlmuaModel.register_for_auto_class('AutoModel')
     LlmuaForCausalLM.register_for_auto_class('AutoModelForCausalLM')
@@ -179,7 +181,7 @@ def main():
     c['auto_map']['AutoModel'] = 'modeling_llmua.LlmuaModel'                       # register_for_auto_class keeps one per class
     json.dump(c, open(cp, 'w'), indent=2, sort_keys=True); open(cp, 'a').write('\n')
     from transformers import GenerationConfig
-    GenerationConfig(bos_token_id=bos_id, eos_token_id=eos_id, pad_token_id=bos_id).save_pretrained(args.out_dir)
+    GenerationConfig(bos_token_id=bos_id, eos_token_id=eos_id, pad_token_id=PAD_ID).save_pretrained(args.out_dir)
     gp = os.path.join(args.out_dir, 'generation_config.json'); g = json.load(open(gp))
     g['suppress_tokens'] = [bos_id]                    # never emit BOS; appended last, as in the released files
     with open(gp, 'w') as f:

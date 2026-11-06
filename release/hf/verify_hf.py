@@ -248,7 +248,7 @@ def stage_gen(a):
         hf_prompt = hf_prompt['input_ids'] if isinstance(hf_prompt, dict) else list(hf_prompt)
         out = hf.generate(torch.tensor([hf_prompt], device=DEV), attention_mask=torch.ones(1, len(hf_prompt), device=DEV, dtype=torch.long),
                           do_sample=False, num_beams=1, max_new_tokens=a.max_new, eos_token_id=spec['end_id'],
-                          pad_token_id=spec['bos_id'], temperature=None, top_p=None, top_k=None)
+                          pad_token_id=1, temperature=None, top_p=None, top_k=None)
         hf_gen = out[0, len(hf_prompt):].tolist()
         first_div = next((k for k, (p, q) in enumerate(zip(ours_gen, hf_gen)) if p != q), None)
         rows.append({'val_example': i, 'prompt_ids_equal': hf_prompt == prefix, 'n_prompt': len(prefix), 'n_ours': len(ours_gen), 'n_hf': len(hf_gen),
