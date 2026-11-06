@@ -68,7 +68,7 @@ the full 6,097-window validation set (§7):
 
 |                                                  |                                                                                  |
 | ------------------------------------------------ | -------------------------------------------------------------------------------- |
-| [paper/llmua_paper1.pdf](paper/llmua_paper1.pdf) | the paper (approved version of 3 November 2026)                                  |
+| [paper/llmua_paper1.pdf](paper/llmua_paper1.pdf) | the paper (final version of 6 November 2026)                                  |
 | [experiments/README.md](experiments/README.md)   | every run of the study as a command, and which run group backs which table       |
 | [uk4b/RUNBOOK.md](uk4b/RUNBOOK.md)               | how the uk4b baseline was recovered and scored                                   |
 | [release/hf/README.md](release/hf/README.md)     | exporting checkpoints to Hugging Face format (`model_type: llmua`)               |
