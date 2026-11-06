@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmua-hf"
+version = "0.1.0"
+description = "LLMUA decoder for Hugging Face transformers (model_type 'llmua')"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.5", "transformers>=4.57"]      # tested with torch 2.11.0, transformers 4.57.6
+
+# this directory is itself the package `llmua_hf`
+[tool.setuptools]
+packages = ["llmua_hf"]
+package-dir = { "llmua_hf" = "." }

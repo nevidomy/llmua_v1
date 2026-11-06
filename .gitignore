@@ -1,0 +1,74 @@
+# Bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtualenvs
+.venv/
+venv/
+
+env/
+ENV/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*~
+
+# Local data artifacts (keep sources under data/ tracked)
+*.parquet
+*.arrow
+*.jsonl
+*.jsonl.gz
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npz
+*.onnx
+
+# Tokenizer / model dumps often written next to notebooks
+tokenizer.json
+vocab.json
+merges.txt
+
+# main_runner.py progress checkpoints
+.runner_ckpts/
+
+# uk4b scoring outputs hold BrUK text, and its tokenizer and checkpoints are
+# fetched per uk4b/RUNBOOK.md. BrUK is CC BY-NC-SA: hashes only in this repo.
+uk4b/*.txt
+uk4b/*.tsv
+uk4b/*.log
+uk4b/*.model

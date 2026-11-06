@@ -1,0 +1,22 @@
+# Python 3.12+. Versions used for the paper's final runs are in the comments.
+
+# training and evaluation
+torch>=2.5        # 2.11.0
+numpy             # 2.5.2
+tqdm              # 4.70.0
+tokenizers        # 0.22.2
+
+# corpus build and the BrUK sentence set
+pyarrow           # 22.0.0
+pyahocorasick     # 2.3.1
+tokenize_uk       # 2.0.0
+
+# figures, fits and uk4b scoring
+matplotlib        # 3.10.9 for the committed figures, 3.11.1 also runs
+pandas            # 3.0.5
+scipy             # 1.18.1
+sentencepiece     # 0.2.2
+termcolor         # 3.3.0
+
+# optional: uk4b/model.py also imports bitsandbytes (stub it if you only score),
+# and release/hf/convert_to_hf.py needs transformers.
