@@ -15,11 +15,18 @@ pads on the left, so batched `generate` works with the tokenizer's own padding. 
 (`suppress_tokens: [0]`): the model should never produce it mid-text. Padding is `<|eos|>` (id 1), never BOS: with
 pad = BOS, `generate(ids)` without an attention mask would mask out the prompt's own BOS.
 
+Reproducibility: the converter writes every output file itself (weights via safetensors, the two code files copied from
+llmua_hf/, and config / generation config / tokenizer files from explicit dicts), so the output does not depend on how a
+transformers version would serialise them. Under transformers 4.57.x every file is byte-identical to the released ones
+(except the model cards, README.md, which are written by hand). Under 5.x the only difference is the `transformers_version`
+value in config.json and generation_config.json, which records the version that is actually running. Both outputs load
+on both versions. (Checked with 4.57.6 and 5.22.2; see FIX_REPORT_3_2026-11-06.md.)
+
 RMSNorm eps: nn.RMSNorm(eps=None) in torch 2.11 uses the fp32 epsilon for all norms, bf16 inputs included
 (eps_micro.py, eps_probe.py), so config.rms_norm_eps = 1.1920928955078125e-07 reproduces training exactly.
 Stock-Qwen3 export for vLLM / llama.cpp: export_qwen3_compat.py.
 """
-import argparse, json, os, sys
+import argparse, json, os, shutil, sys
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -92,30 +99,54 @@ def tokenizer_json(src, sft=None):
             del vocab[ch]; vocab[name] = sft[key]
             d['added_tokens'].append(dict(id=sft[key], content=name, single_word=False, lstrip=False,
                                           rstrip=False, normalized=False, special=True))
+        d['model']['vocab'] = dict(sorted(vocab.items(), key=lambda kv: kv[1]))      # Rust writes the vocab in id order
+        d['added_tokens'].sort(key=lambda t: t['id'])
     return d
 
 
+def write_json(path, obj, sort_keys=True, newline=True):
+    """indent-2 JSON, as transformers 4.57 writes its config files."""
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(obj, indent=2, sort_keys=sort_keys, ensure_ascii=False) + ('\n' if newline else ''))
+
+
+def tokenizer_config(d, sft, max_len):
+    """tokenizer_config.json in the form transformers 4.57 writes for a PreTrainedTokenizerFast (explicit, so that
+    transformers 5, which writes a different schema, gives the same file)."""
+    keys = ('content', 'lstrip', 'normalized', 'rstrip', 'single_word', 'special')
+    cfg = {'added_tokens_decoder': {str(t['id']): {k: t[k] for k in keys} for t in d['added_tokens']},
+           'bos_token': '<|bos|>', 'eos_token': '<|end|>' if sft else '<|eos|>', 'pad_token': '<|eos|>',
+           'clean_up_tokenization_spaces': False, 'extra_special_tokens': {},
+           'model_input_names': ['input_ids', 'attention_mask'],       # no token_type_ids: model.generate(**tok(text)) must work
+           'model_max_length': max_len, 'padding_side': 'left', 'tokenizer_class': 'PreTrainedTokenizerFast'}
+    if sft:
+        cfg['additional_special_tokens'] = list(SFT_NAMES.values())
+    return cfg
+
+
 def save_tokenizer(out_dir, src, sft, max_len):
+    """Writes tokenizer.json (compact dump, as released), tokenizer_config.json, special_tokens_map.json and, for SFT,
+    chat_template.jinja; then loads the folder back with transformers and checks the specials."""
     from transformers import PreTrainedTokenizerFast
     d = tokenizer_json(src, sft)
-    tmp = os.path.join(out_dir, 'tokenizer.json')
-    json.dump(d, open(tmp, 'w'), ensure_ascii=False)
-    kw = dict(bos_token='<|bos|>', eos_token='<|end|>' if sft else '<|eos|>', pad_token='<|eos|>',
-              model_max_length=max_len, clean_up_tokenization_spaces=False, padding_side='left',
-              model_input_names=['input_ids', 'attention_mask'])      # no token_type_ids: model.generate(**tok(text)) must work
+    with open(os.path.join(out_dir, 'tokenizer.json'), 'w', encoding='utf-8') as f:
+        f.write(json.dumps(d, ensure_ascii=False))
+    cfg = tokenizer_config(d, sft, max_len)
+    write_json(os.path.join(out_dir, 'tokenizer_config.json'), cfg)
+    smap = {k: cfg[k] for k in ('bos_token', 'eos_token', 'pad_token')}
     if sft:
-        kw['additional_special_tokens'] = list(SFT_NAMES.values())
-    tok = PreTrainedTokenizerFast(tokenizer_file=tmp, **kw)
+        smap['additional_special_tokens'] = cfg['additional_special_tokens']
+    write_json(os.path.join(out_dir, 'special_tokens_map.json'), smap)
     if sft:
-        tok.chat_template = CHAT_TEMPLATE
+        with open(os.path.join(out_dir, 'chat_template.jinja'), 'w', encoding='utf-8') as f:
+            f.write(CHAT_TEMPLATE)
+    tok = PreTrainedTokenizerFast.from_pretrained(out_dir)
+    assert tok.bos_token_id == 0 and tok.pad_token_id == PAD_ID, (tok.bos_token_id, tok.pad_token_id)
+    assert tok.eos_token_id == (sft['end_id'] if sft else 1) and tok.padding_side == 'left'
+    if sft:
         for key, name in SFT_NAMES.items():
             assert tok.convert_tokens_to_ids(name) == sft[key], name
-    assert tok.bos_token_id == 0 and tok.pad_token_id == PAD_ID, (tok.bos_token_id, tok.pad_token_id)
-    tok.save_pretrained(out_dir)
-    with open(tmp) as f:                                   # released tokenizer.json is the compact dump (2.2 MB, one line)
-        compact = json.dumps(json.load(f), ensure_ascii=False)
-    with open(tmp, 'w') as f:
-        f.write(compact)
+        assert tok.chat_template == CHAT_TEMPLATE
     return tok
 
 
@@ -163,7 +194,6 @@ def main():
     ap.add_argument('--no-check', action='store_true', help='skip the random-token smoke check against the native model')
     args = ap.parse_args()
     sys.path.insert(0, HERE)
-    from llmua_hf import LlmuaConfig, LlmuaForCausalLM, LlmuaModel
 
     ck, sd, arch = load_ckpt(args.ckpt)
     cfg = ck.get('cfg') or {}
@@ -172,20 +202,29 @@ def main():
     bos_id = int(arch['bos_id']); eos_id = specials['end_id'] if sft else 1       # base: pretraining docs end in <|eos|>=1
     os.makedirs(args.out_dir, exist_ok=True)
 
-    model = build_model(sd, arch, args.rms_eps, bos_id, eos_id, PAD_ID)
-    LlmuaConfig.register_for_auto_class('AutoConfig')                             # auto_map + copies of the two .py files
-    LlmuaModel.register_for_auto_class('AutoModel')
-    LlmuaForCausalLM.register_for_auto_class('AutoModelForCausalLM')
-    model.save_pretrained(args.out_dir, safe_serialization=True)                  # fp32, tied weight stored once
-    cp = os.path.join(args.out_dir, 'config.json'); c = json.load(open(cp))
-    c['auto_map']['AutoModel'] = 'modeling_llmua.LlmuaModel'                       # register_for_auto_class keeps one per class
-    json.dump(c, open(cp, 'w'), indent=2, sort_keys=True); open(cp, 'a').write('\n')
-    from transformers import GenerationConfig
-    GenerationConfig(bos_token_id=bos_id, eos_token_id=eos_id, pad_token_id=PAD_ID).save_pretrained(args.out_dir)
-    gp = os.path.join(args.out_dir, 'generation_config.json'); g = json.load(open(gp))
-    g['suppress_tokens'] = [bos_id]                    # never emit BOS; appended last, as in the released files
-    with open(gp, 'w') as f:
-        json.dump(g, f, indent=2)
+    import transformers
+    from safetensors.torch import save_file
+    model = build_model(sd, arch, args.rms_eps, bos_id, eos_id, PAD_ID)          # sanity: tie, parameter count
+    # weights: the trained tensors under their training names, fp32, tied lmh stored once (= what save_pretrained writes)
+    save_file({k: v.detach().contiguous() for k, v in sd.items() if k != 'lmh.weight'},
+              os.path.join(args.out_dir, 'model.safetensors'), metadata={'format': 'pt'})
+    for f in ('configuration_llmua.py', 'modeling_llmua.py'):                     # the code that trust_remote_code loads
+        shutil.copyfile(os.path.join(HERE, 'llmua_hf', f), os.path.join(args.out_dir, f))
+    ver = transformers.__version__                                                 # honest: the version that is running
+    c = llmua_config(arch, args.rms_eps, bos_id, eos_id, PAD_ID)
+    config = {'architectures': ['LlmuaForCausalLM'],
+              'auto_map': {'AutoConfig': 'configuration_llmua.LlmuaConfig', 'AutoModel': 'modeling_llmua.LlmuaModel',
+                           'AutoModelForCausalLM': 'modeling_llmua.LlmuaForCausalLM'},
+              'bos_token_id': bos_id, 'dtype': 'float32', 'eos_token_id': eos_id, 'head_dim': c.head_dim, 'hidden_size': c.hidden_size,
+              'intermediate_size': c.intermediate_size, 'max_position_embeddings': c.max_position_embeddings, 'model_type': 'llmua',
+              'num_attention_heads': c.num_attention_heads, 'num_hidden_layers': c.num_hidden_layers, 'pad_token_id': PAD_ID,
+              'qk_norm': c.qk_norm, 'rms_norm_eps': c.rms_norm_eps, 'rope_theta': c.rope_theta, 'transformers_version': ver,
+              'use_cache': True, 'vocab_size': c.vocab_size}
+    assert c.model_type == 'llmua' and c.tie_word_embeddings is True               # tie_word_embeddings is the default, so not written
+    write_json(os.path.join(args.out_dir, 'config.json'), config)
+    gen = {'bos_token_id': bos_id, 'eos_token_id': eos_id, 'pad_token_id': PAD_ID, 'transformers_version': ver,
+           'suppress_tokens': [bos_id]}                                            # never emit BOS mid-text
+    write_json(os.path.join(args.out_dir, 'generation_config.json'), gen, sort_keys=False, newline=False)
     tok = save_tokenizer(args.out_dir, args.tokenizer, specials, arch['width'])
     print(f"saved {args.out_dir}: {'SFT' if sft else 'base'}  d={arch['embeddings']} L={arch['blocks']} "
           f"H={arch['embeddings'] // arch['headsize']} F={arch['ff_width']}  params {sum(p.numel() for p in model.parameters()):,}  "

@@ -14,7 +14,7 @@ The released weights, with model cards, are
 | file | what |
 |---|---|
 | `llmua_hf/` | `LlmuaConfig` and `LlmuaForCausalLM` for transformers (KV cache, padding masks, `generate`); installable with `pip install ./release/hf/llmua_hf` |
-| `convert_to_hf.py` | checkpoint → HF folder: safetensors, config, tokenizer (left padding, newline normalizer), generation config (BOS suppressed), and for fine-tuned checkpoints a chat template. Reproduces the released files byte for byte |
+| `convert_to_hf.py` | checkpoint → HF folder: safetensors, config, tokenizer (left padding, newline normalizer), generation config (BOS suppressed), and for fine-tuned checkpoints a chat template. It writes every file itself. Under transformers 4.57.x the output is byte-identical to the released files (the model cards aside); under 5.x the only difference is the `transformers_version` value in `config.json` and `generation_config.json`, which records the version that ran. Both outputs load on both versions |
 | `verify_hf.py` | checks against the native model: logits, full-validation bpc, greedy generation, tokenizer |
 | `verify_llmua_extra.py` | batched generation with left padding, save/load round trip, loading through `register()` |
 | `export_qwen3_compat.py` | optional export in the stock `Qwen3ForCausalLM` layout, for tools that only run known architectures (vLLM, llama.cpp). It re-splits the tensors, so it is not the release format |

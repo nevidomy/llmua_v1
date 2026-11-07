@@ -245,7 +245,7 @@ def stage_gen(a):
                                   encode=lambda t: encode_text(dec, t))
         ours_gen = sess.ids[len(prefix):]
         hf_prompt = tok.apply_chat_template([{'role': 'user', 'content': text}], add_generation_prompt=True, tokenize=True)
-        hf_prompt = hf_prompt['input_ids'] if isinstance(hf_prompt, dict) else list(hf_prompt)
+        hf_prompt = list(hf_prompt['input_ids']) if hasattr(hf_prompt, 'keys') else list(hf_prompt)   # v5: BatchEncoding, not a dict
         out = hf.generate(torch.tensor([hf_prompt], device=DEV), attention_mask=torch.ones(1, len(hf_prompt), device=DEV, dtype=torch.long),
                           do_sample=False, num_beams=1, max_new_tokens=a.max_new, eos_token_id=spec['end_id'],
                           pad_token_id=1, temperature=None, top_p=None, top_k=None)
@@ -310,7 +310,8 @@ def stage_tok(a):
     crq = [any(c in t for c in '\x0b\x0c\r') for t in qs]; cra = [any(c in t for c in '\x0b\x0c\r') for t in ans]
     tmpl_q = [sft.apply_chat_template([{'role': 'user', 'content': t}], add_generation_prompt=True, tokenize=True) for t in qs]
     tmpl_qa = [sft.apply_chat_template([{'role': 'user', 'content': q}, {'role': 'assistant', 'content': t}], tokenize=True) for q, t in zip(qs, ans)]
-    tmpl_q = [x['input_ids'] if isinstance(x, dict) else x for x in tmpl_q]; tmpl_qa = [x['input_ids'] if isinstance(x, dict) else x for x in tmpl_qa]
+    ids_of = lambda x: list(x['input_ids']) if hasattr(x, 'keys') else list(x)           # v5 returns a BatchEncoding, not a dict
+    tmpl_q = [ids_of(x) for x in tmpl_q]; tmpl_qa = [ids_of(x) for x in tmpl_qa]
     want_q = [[0, 201] + enc(q) + [202] for q in qs]                              # sft/chat.py format_user_turn
     want_qa = [[0, 201] + enc(q) + [202] + enc(t) + [203] for q, t in zip(qs, ans)]
     res['sft_val_examples'] = {
